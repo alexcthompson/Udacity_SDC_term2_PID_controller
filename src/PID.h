@@ -1,6 +1,8 @@
 #ifndef PID_H
 #define PID_H
 
+#include <vector>
+
 class PID {
 public:
   /*
@@ -12,10 +14,35 @@ public:
 
   /*
   * Coefficients
-  */ 
-  double Kp;
-  double Ki;
-  double Kd;
+  */
+  std::vector<double> params;
+  std::vector<double> last_params;
+
+  // Twiddle?
+  bool twiddle;
+
+  // twiddle tracking
+  int steps;
+  int steps_to_run_straight;
+  int steps_to_initialize;
+  int steps_to_evaluate;
+  std::vector<double> twiddle_amounts;
+  double reduction_factor = 0.3;
+  
+  int index;
+  double error_to_beat;
+  bool error_initialized;
+  double current_trun_error;
+
+  // error for escalation
+  double error_per_step_thresh;
+  double per_step_improvement_factor;
+  double graduating_error;
+  double run_lenghtening_factor;
+
+  bool new_run;
+  bool was_a_param_updated;
+
 
   /*
   * Constructor
@@ -35,12 +62,17 @@ public:
   /*
   * Update the PID error variables given cross track error.
   */
-  void UpdateError(double cte);
+  void UpdateErrorSimple(double cte);
 
   /*
-  * Calculate the total PID error.
+  * Update the PID error and execute gnarly twiddle control flow
   */
-  double TotalError();
+  void UpdateErrorAndTwiddle(double cte);
+
+  /*
+  * Returns a steering ratio in [-1.0, 1.0] based on current error
+  */
+  double Steer();
 };
 
 #endif /* PID_H */

@@ -33,7 +33,14 @@ int main()
   uWS::Hub h;
 
   PID pid;
-  // TODO: Initialize the pid variable.
+  pid.twiddle = false;
+
+  if (!pid.twiddle) {
+    pid.Init(0.06875, 0.00125, 0.75);
+  }
+  else {
+    pid.Init(0.1, 0.001, 0.6);
+  }
 
   h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -49,24 +56,42 @@ int main()
           // j[1] is the data JSON object
           double cte = std::stod(j[1]["cte"].get<std::string>());
           double speed = std::stod(j[1]["speed"].get<std::string>());
-          double angle = std::stod(j[1]["steering_angle"].get<std::string>());
+          // double angle = std::stod(j[1]["steering_angle"].get<std::string>());
+
+          // update steer and throttle
           double steer_value;
-          /*
-          * TODO: Calcuate steering value here, remember the steering value is
-          * [-1, 1].
-          * NOTE: Feel free to play around with the throttle and speed. Maybe use
-          * another PID controller to control the speed!
-          */
-          
+          double throttle_value;
+
+          if(!pid.twiddle) {
+            pid.UpdateErrorSimple(cte);
+            steer_value = pid.Steer();
+            throttle_value = 0.4;
+          }
+          else {
+            pid.UpdateErrorAndTwiddle(cte);
+            steer_value = pid.Steer();
+            throttle_value = 0.4;
+          }
+
+          // needed for twiddle only but better outside of IF scope
+          int stop_on_step_count = pid.steps_to_run_straight + pid.steps_to_initialize + pid.steps_to_evaluate;
+
           // DEBUG
-          std::cout << "CTE: " << cte << " Steering Value: " << steer_value << std::endl;
+          // std::cout << "CTE: " << cte << " Steering Value: " << steer_value << std::endl;
 
           json msgJson;
           msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = 0.3;
+          msgJson["throttle"] = throttle_value;
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          // std::cout << msg << std::endl;
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+
+          // send reset message after completed twiddle run
+          if (pid.twiddle && pid.steps == stop_on_step_count) {
+            pid.steps = 0;
+            std::string msg = "42[\"reset\",{}]";
+            ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+          }
         }
       } else {
         // Manual driving
