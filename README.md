@@ -1,98 +1,57 @@
 # CarND-Controls-PID
 Self-Driving Car Engineer Nanodegree Program
 
----
+# Reflection
 
-## Dependencies
+## Formalities
 
-* cmake >= 3.5
- * All OSes: [click here for installation instructions](https://cmake.org/install/)
-* make >= 4.1(mac, linux), 3.81(Windows)
-  * Linux: make is installed by default on most Linux distros
-  * Mac: [install Xcode command line tools to get make](https://developer.apple.com/xcode/features/)
-  * Windows: [Click here for installation instructions](http://gnuwin32.sourceforge.net/packages/make.htm)
-* gcc/g++ >= 5.4
-  * Linux: gcc / g++ is installed by default on most Linux distros
-  * Mac: same deal as make - [install Xcode command line tools]((https://developer.apple.com/xcode/features/)
-  * Windows: recommend using [MinGW](http://www.mingw.org/)
-* [uWebSockets](https://github.com/uWebSockets/uWebSockets)
-  * Run either `./install-mac.sh` or `./install-ubuntu.sh`.
-  * If you install from source, checkout to commit `e94b6e1`, i.e.
-    ```
-    git clone https://github.com/uWebSockets/uWebSockets 
-    cd uWebSockets
-    git checkout e94b6e1
-    ```
-    Some function signatures have changed in v0.14.x. See [this PR](https://github.com/udacity/CarND-MPC-Project/pull/3) for more details.
-* Simulator. You can download these from the [project intro page](https://github.com/udacity/self-driving-car-sim/releases) in the classroom.
+The code compiles without warnings or errors, and the car can successfully drive a full lap around the track with the settings:
 
-There's an experimental patch for windows in this [PR](https://github.com/udacity/CarND-PID-Control-Project/pull/3)
+- `P` as `Kp = 0.06875`
+- `I` as `Ki = 0.00125`
+- `D` as `Kd = 0.75`
+- throttle set to a constant value of `0.4`
 
-## Basic Build Instructions
+My values may not completely match others as I decided to interpret the PID outputs as steering angles in radians, and then limit them to the range `[-0.4363323, 0.4363323]`, which corresponds to -25 and 25 degrees.  I then scaled them to the range `[-1, 1]`, so my coefficients may perform differently.
 
-1. Clone this repo.
-2. Make a build directory: `mkdir build && cd build`
-3. Compile: `cmake .. && make`
-4. Run it: `./pid`. 
+# Practical considerations of P, I, and D
 
-Tips for setting up your environment can be found [here](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/0949fca6-b379-42af-a919-ee50aa304e6a/lessons/f758c44c-5e40-4e01-93b5-1a82aa4e044f/concepts/23d376c7-0195-4276-bdf0-e02f1f3c665d)
+After twiddling as a human with values, and then observing the *Twiddle* algorithm twiddle with the PID values, I see two competing dynamics in play:
 
-## Editor Settings
+1. You want the PID controller to be responsive enough to get the car back on track quickly, particularly in sharp turns.
+2. However, the PID system has a tendency to generate reinforcing oscillations that can strengthen through positive feedback and send the car into the lake or up into the hills.
 
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
+`P` is straightforward - the more you are off the line, the more it tries to bring you back.  `P`'s influence becomes pathological when the car is far off track, and there is too much time for `P`'s contribution to make yaw relative to the driving line very high, leading to bad overshoot.
 
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
+`D`, as a measure of the rate of change, serves to slow the rate of change, by opposing rapidly changing `CTE`.  It can help moderate `P`'s pathology.  However, when the car overshoots rapidly, `D` can contribute to the car steering violently back.  `P` and `D` together can be a bad combination and I have yet to figure out how to counter and balance them properly.  In general it seems that setting `D` to be 10-15 times larger than `P` seems to be about right.
 
-## Code Style
+`I` fixes bias and controls drift in turns.  By integrating the error, it can correct for a slow moving bias in the steering mechanism.  As well, when you go wide in turns, which tends to happen, `I`'s effect is to keep that wide swing from taking you off track, helping `P`.
 
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
+# Tuning hyper-parameters
 
-## Project Instructions and Rubric
+I did some fiddling by hand to find hyper parameters that got me through the first two turns.  Then I got ambitious, and decided to try and implement an iterative version of Twiddle.  I used this to refine my PID values until I found ones I liked.  I decided not to mess with speed, and pegged the throttle at a constant 0.4.
 
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
+My iterative Twiddle implementation is imperfect and in need of a serious refactor, but here is the idea:
 
-More information is only accessible by people who are already enrolled in Term 2
-of CarND. If you are enrolled, see [the project page](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/f1820894-8322-4bb3-81aa-b26b3c6dcbaf/lessons/e8235395-22dd-4b87-88e0-d108c5e5bbf4/concepts/6a4d8d42-6a04-4aa6-b284-1697c0fd6562)
-for instructions and the project rubric.
+1. Starting with crude values, run Twiddle across a short distance until you can get the `CTE^2` value below a certain threshold _per step_, say 0.2.
+2. Now, lengthen the distance on which you evaluate each run.
+3. And lower your threshold for _per step_ squared error.
+4. Again, run Twiddle, selecting better and better values until you have an PID parameter set that meets your _per step_ standard.  This algorithm _graduates_ to a longer course, with a more stringent standard for _per step squared error_.
+5. Iterate.
 
-## Hints!
+In this way I was able to find the above values, which tend to run the course nicely.
 
-* You don't have to follow this directory structure, but if you do, your work
-  will span all of the .cpp files here. Keep an eye out for TODOs.
+Along the way, I ran into a lot of problems that remind me of other machine learning problems, particularly ones you run across in deep learning, here are some:
 
-## Call for IDE Profiles Pull Requests
+1. You want to learn the PID values that perform best for the whole course.  As you find values that do well for the first part of the course, you now want to test them on later parts.  So you would prefer to assess them on this later part.  But this comes with a few problems:
+  - You have to wait for the car to get the later part
+  - You have to define what those later parts are.  You typically need to focus on doing the curves well, but there are plenty of straight sections on the track.
+2. The PID values that do well in straights are not ideal for curves, and those that do well in curves are not ideal for straights.  You want your iterative implementation to learn curves, but not forget straights, and vice versa.  Tricky!
+3. Controlling model standards was tricky.  An error rate feasible in one part of the track was totally unachievable in others, so you need to control your model evaluation and graduation carefully.  As well, you have to be careful in how you cultivate early models, since they fail quickly, you must select for models that do well over short distances.
+4. As I progressed, I could start to see lots of weaknesses in the PID controller design, and had ideas to correct them.
+  - One obvious one is that the PID controller does not factor in estimated time to crossing the center-track-line at the current yaw rate.  `D` looks at rate but not rate vs distance.  `P` looks at distance but not rate of closure.  Ideally it would be good to have a factor in the model that looks at the time to closure.
+  - As you cook up enough of these factors to add to the PID model, you can see that an iterative learning model for these factors gets very complex.  You start to imagine learning techniques that are basically those found in ML and Deep Learning.
+  - Which begs the question, why not upgrade the model a bit.
+  - And since we have an explicit physical model for the cars path, why not make use of that.
 
-Help your fellow students!
-
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to we ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
-
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
-
+That, I feel, is the genius of this project: it makes the motivation for the MPC clear.  It's very obvious that the MPC is a solution to 95% of the issues of the PID.
